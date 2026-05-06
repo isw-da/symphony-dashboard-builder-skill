@@ -18,3 +18,19 @@ Example prompts:
 ## Files
 
 - `SKILL.md` — the skill definition (interview flow, API rules, JSON generation templates)
+
+## See also
+
+Other Logi Symphony / Simba Intelligence developer toolkit components in the
+same org:
+
+- [`isw-da/composer-mcp`](https://github.com/isw-da/composer-mcp) — MCP
+  server that turns this skill's patterns into runtime tools any Claude
+  session can call directly. Use it when you want Claude to drive Composer
+  end-to-end rather than hand-generating JSON.
+- [`isw-da/simba-intelligence-skill`](https://github.com/isw-da/simba-intelligence-skill)
+  — Claude skill for installing, configuring, and troubleshooting Simba
+  Intelligence on Kubernetes.
+- [`isw-da/edc-graphql`](https://github.com/isw-da/edc-graphql) — Java
+  Enterprise Data Connector that lets Composer / Simba Intelligence query
+  any GraphQL API.
