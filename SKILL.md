@@ -745,7 +745,7 @@ built. Catch it and hand it to the dashboard rather than making the user rebuild
 const bot = await manager.createComponent('chat-bot', { theme: '__platform__' });
 await bot.render(botEl, { width: '100%', height: '100%' });
 
-bot.addEventListener('composer-chat-visual-received', (e) => {
+botEl.addEventListener('composer-chat-visual-received', (e) => {
   const visParams = e.detail?.visParams;
   if (visParams) openInDashboard(visParams);
 });
@@ -763,10 +763,14 @@ The drawer and modal above need a click to react to. The SDK emits these, and th
 whole drill-through mechanism:
 
 ```javascript
-dashboard.addEventListener('composer-visual-series-clicked', (e) => {
+// Listen on the CONTAINER, not on the component object. The SDK binds its own
+// listeners with `this.htmlElement.addEventListener(...)`, so the element you
+// rendered into is what emits. `dashboard.addEventListener(...)` silently never
+// fires: the component is not an EventTarget.
+dashEl.addEventListener('composer-visual-series-clicked', (e) => {
   openDrawer(e.detail);          // a bar, slice or point within a visual
 });
-dashboard.addEventListener('composer-visual-right-clicked', (e) => {
+dashEl.addEventListener('composer-visual-right-clicked', (e) => {
   showContextMenu(e.detail);     // your own menu, if the built-in one does not fit
 });
 ```
@@ -777,20 +781,27 @@ touch devices. `composer-visual-rendered` tells you a visual has actually painte
 the honest signal to hide a loading state; `composer-dashboard-loaded` fires earlier and does
 not mean the visuals are up.
 
-### Handling an expired token
+### Handling a token the server will not accept
 
-`composer-unauthorized` fires when the token behind the embed stops being accepted. Without
-a listener the embed simply stops updating and looks like a hang.
+When `getToken` returns something Composer rejects, the SDK dispatches
+**`composer-init-failed`** on `document`. Not on your container, and not on the component.
 
 ```javascript
-dashboard.addEventListener('composer-unauthorized', async () => {
+document.addEventListener('composer-init-failed', async () => {
   await manager.initializeToken();   // re-mint through your getToken callback
 });
 ```
 
-This matters more than it sounds. `getToken` is called once at boot, so a long-lived page,
-a dashboard left open on a wall display, or a user returning from lunch will all outlive the
-first token.
+`initializeToken()` is a real method on the manager: the constructor calls it once when a
+`getToken` is supplied, and calling it again re-runs that callback.
+
+**A trap worth knowing.** The SDK declares a constant `composer-unauthorized` and never
+dispatches it. It appears exactly once in the bundle, in an enum next to
+`composer-init-failed`, and nothing fires it. A listener bound to it will wait forever, and
+the symptom is an embed that quietly stops updating. Use `composer-init-failed`.
+
+This matters more than it sounds. `getToken` is called once at boot, so a long-lived page, a
+dashboard on a wall display, or a user returning from lunch will all outlive the first token.
 
 ### Export
 

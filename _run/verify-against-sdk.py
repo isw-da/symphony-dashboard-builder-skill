@@ -99,6 +99,44 @@ for bad in ["forTopic"]:
         if not re.search(r"not|never|ignored|silently|does not", ctx, re.I):
             fails.append(f"{bad} appears in SKILL.md without being marked as unsupported")
 
+# 7. Existence is not enough: a real symbol used on the wrong object fails
+#    silently, which is worse than a typo. Two rules the bundle establishes.
+#
+#    (a) Component events are bound by the SDK with
+#        `this.htmlElement.addEventListener(...)`, so the CONTAINER emits, not the
+#        component object. `dashboard.addEventListener('composer-...')` never fires
+#        because the component is not an EventTarget.
+for m in re.finditer(r"\b(dashboard|bot|drawer|component)\.addEventListener\(\s*[\"']composer-", SKILL):
+    checked += 1
+    fails.append(
+        f"{m.group(1)}.addEventListener() binds to the component object; the SDK emits on "
+        f"the container element it rendered into, so this listener never fires")
+
+#    (b) An event NAME that exists in the bundle but is never dispatched is a
+#        listener that waits forever. Check that each claimed event is actually
+#        emitted, not merely declared in an enum. composer-unauthorized is the
+#        live example: declared once, dispatched nowhere.
+_dispatched = set()
+for m in re.finditer(r"[\"'](composer-[a-z-]+)[\"']", SDK):
+    ev = m.group(1)
+    # an event assigned into an enum and never referenced again is declared, not emitted
+    if len(re.findall(re.escape(ev), SDK)) > 1 or re.search(rf"dispatchEvent\([^)]*{re.escape(ev)}", SDK):
+        _dispatched.add(ev)
+_declared_only = {"composer-unauthorized"}
+for ev in sorted(_ev_claims):
+    if ev in _declared_only:
+        # EVERY occurrence must be caveated, not just the first. Checking only
+        # SKILL.find(ev) passes the whole file the moment one properly-worded
+        # mention exists, which is how a later uncaveated use slips through.
+        for m in re.finditer(re.escape(ev), SKILL):
+            checked += 1
+            ctx = SKILL[max(0, m.start() - 500): m.start() + 500]
+            if not re.search(r"never dispatch|never fire|declared|waits forever|trap", ctx, re.I):
+                fails.append(
+                    f"{ev} at offset {m.start()} is never dispatched by the SDK; using it "
+                    f"without saying so gives a listener that waits forever")
+                break
+
 print(f"SDK: {len(sdk_events)} events, {len(sdk_methods)} methods")
 print(f"checked {checked} claims in SKILL.md against it")
 print()
