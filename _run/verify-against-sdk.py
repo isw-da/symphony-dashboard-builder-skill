@@ -22,7 +22,20 @@ SKILL = (ROOT / "SKILL.md").read_text(encoding="utf-8")
 # Symbols the SDK genuinely provides, derived from the SDK itself rather than
 # hand-listed, so a new SDK build changes the answer instead of the manifest.
 sdk_events = set(re.findall(r"composer-[a-z-]+", SDK)) | set(re.findall(r'"(EMBED/[A-Z_]+)"', SDK))
-sdk_methods = set(re.findall(r"\b(publish|subscribe|unsubscribe|createComponent|render|destroy|update|initializeToken|addEventListener|removeEventListener)\s*\(", SDK))
+# Ownership matters: `destroy` exists on both the manager and a component and
+# means very different things. Record every method DEFINITION with its shape
+# rather than every call site, so a name that only ever appears as a call does
+# not count as provided.
+# In minified class bodies a method definition follows the previous method's
+# closing brace, so `}` must be in the preceding set or every one is missed.
+sdk_methods = set(re.findall(r"(?:^|[{};,])\s*(?:async\s+)?([a-zA-Z_$][\w$]*)\s*\([^)]{0,80}\)\s*\{", SDK))
+sdk_async = set(re.findall(r"\basync\s+([a-zA-Z_$][\w$]*)\s*\(", SDK))
+# Some methods are assigned rather than declared, so the async keyword is not
+# adjacent. The SDK awaiting its own call is the authority: it does
+# `(await t.createComponent(i.type,i)).render(...)`, awaiting the create and
+# NOT the render.
+sdk_async |= set(re.findall(r"await\s+[a-zA-Z_$][\w$]*\.([a-zA-Z_$][\w$]*)\s*\(", SDK))
+sdk_methods |= sdk_async
 sdk_idents = set(re.findall(r"[A-Za-z_$][A-Za-z0-9_$]{2,}", SDK))
 
 fails, checked = [], 0
@@ -80,16 +93,18 @@ for k in SDK_INTERPRETED:
             fails.append(f"config key {k} is read by the SDK and is absent from it: {k}")
 
 for k in PASS_THROUGH:
-    if re.search(rf"\b{k}\b", SKILL):
+    # EVERY occurrence needs the caveat. Checking only the first passes the whole
+    # file once one correctly-worded mention exists. This is the second place that
+    # bug appeared; the first was the declared-only event check.
+    for _m in re.finditer(rf"\b{k}\b", SKILL):
         checked += 1
-        # find the section it appears in and require an unverified marker nearby
-        i = SKILL.find(k)
-        ctx = SKILL[max(0, i - 600): i + 600]
+        ctx = SKILL[max(0, _m.start() - 600): _m.start() + 600]
         if not re.search(r"not verifiable|unverified|opaque|pass(ed)?[- ]through|cannot be confirmed",
                          ctx, re.I):
             fails.append(
-                f"{k} rides inside publish() options and cannot be confirmed from the SDK, "
-                f"so it must be marked as unverified where it is used")
+                f"{k} at offset {_m.start()} rides inside publish() options and cannot be "
+                f"confirmed from the SDK, so it must be marked as unverified where it is used")
+            break
 
 # 6. keys the SDK does NOT know must never be presented as working
 for bad in ["forTopic"]:
@@ -102,15 +117,26 @@ for bad in ["forTopic"]:
 # 7. Existence is not enough: a real symbol used on the wrong object fails
 #    silently, which is worse than a typo. Two rules the bundle establishes.
 #
-#    (a) Component events are bound by the SDK with
-#        `this.htmlElement.addEventListener(...)`, so the CONTAINER emits, not the
-#        component object. `dashboard.addEventListener('composer-...')` never fires
-#        because the component is not an EventTarget.
-for m in re.finditer(r"\b(dashboard|bot|drawer|component)\.addEventListener\(\s*[\"']composer-", SKILL):
+#    (a) Components DO proxy addEventListener onto their own element: every
+#        component class ships
+#        `addEventListener(e,t){this.htmlElement.addEventListener(e,t)}`.
+#        An earlier version of this gate asserted the opposite and hard-failed
+#        the correct pattern, because it was written from a reading of the
+#        bundle rather than from the bundle. So assert the proxy EXISTS, and
+#        flag the container-listener pattern instead: renderComponent does
+#        `i.appendChild(e.htmlElement)`, making htmlElement a CHILD of the
+#        container, so a container listener depends on bubbling that embed.js
+#        never establishes.
+checked += 1
+if "addEventListener(e,t){this.htmlElement.addEventListener(e,t)}" not in SDK:
+    fails.append("the component addEventListener proxy is gone from this SDK build; "
+                 "re-check which target the skill should teach")
+for m in re.finditer(r"\b(dashEl|botEl|drawerBody|drawerEl)\.addEventListener\(\s*[\"'](composer-[a-z-]+)", SKILL):
     checked += 1
     fails.append(
-        f"{m.group(1)}.addEventListener() binds to the component object; the SDK emits on "
-        f"the container element it rendered into, so this listener never fires")
+        f"{m.group(1)}.addEventListener() listens on the container; the SDK appends "
+        f"htmlElement as a child of it, so this depends on bubbling the bundle does not "
+        f"establish. Listen on the component.")
 
 #    (b) An event NAME that exists in the bundle but is never dispatched is a
 #        listener that waits forever. Check that each claimed event is actually
@@ -136,6 +162,18 @@ for ev in sorted(_ev_claims):
                     f"{ev} at offset {m.start()} is never dispatched by the SDK; using it "
                     f"without saying so gives a listener that waits forever")
                 break
+
+# 8. `await x.m()` where m is not async returns undefined immediately and
+#    guarantees nothing. initializeToken and render are both like this.
+for m in re.finditer(r"await\s+[a-zA-Z_$][\w$]*\.([a-zA-Z_$][\w$]*)\s*\(", SKILL):
+    name = m.group(1)
+    if name in sdk_methods and name not in sdk_async:
+        checked += 1
+        i = m.start()
+        ctx = SKILL[max(0, i - 400): i + 400]
+        if not re.search(r"not async|returns undefined|resolves immediately|guarantees nothing", ctx, re.I):
+            fails.append(f"await on .{name}(), which the SDK does not declare async: it returns "
+                         f"undefined and the await guarantees nothing")
 
 print(f"SDK: {len(sdk_events)} events, {len(sdk_methods)} methods")
 print(f"checked {checked} claims in SKILL.md against it")

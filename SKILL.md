@@ -585,240 +585,247 @@ const token = await fetch(baseUrl + '/api/trusted-access/push/tokens', {
 ## Client-Side Assembly
 
 Everything above builds the dashboard on the server. This part builds the application around
-it: the filter bar, the drill-through drawer and modal, the chatbot handoff, and the export
-overlay. Together they are the difference between an embedded dashboard and a product that
-happens to contain one.
+it. It is one working page rather than a set of snippets, because an earlier version of this
+section was snippets and a reviewer who assembled them hit four separate blockers before
+anything rendered.
 
-Every API call below was checked against the embed SDK served by a running Composer 26.2.1
-(`/discovery/embed/embed.js`). `_run/verify-against-sdk.py` re-checks them on demand, so a
-symbol that stops existing fails a check rather than surviving in prose.
+Every symbol below is checked against the embed SDK served by a running Composer 26.2.1
+(`/discovery/embed/embed.js`) by `_run/verify-against-sdk.py`, which also parses this code as
+a module and fails on an undefined reference.
 
-### What you have to supply
+### The three rules everything else follows from
 
-Every snippet below assumes these. They are yours to provide, and the SDK will not tell you
-if you get them wrong.
+1. **Render once.** Calling `render()` again re-appends the loader, appends a second
+   `<style>` block, and re-initialises the same component instance. (It does not abort
+   in-flight requests: there is no such code, and an earlier draft of this section said there
+   was.) If you genuinely need to re-render, use `manager.refreshComponent(id)`, which
+   destroys first. Otherwise boot once, render once, show and hide with CSS.
+2. **Every render target needs a real box before you render into it.** Not `auto`, not
+   `display: none`. A zero-height container measures zero and never paints, and looks exactly
+   like rule 1 being broken.
+3. **Never detach or reparent a rendered container.** The manager runs a debounced
+   `MutationObserver` over `document.body` and silently destroys any component whose element
+   `document.querySelector` can no longer find. Opacity survives this; moving the node does
+   not, and the destruction is permanent and unlogged.
+4. **A hidden panel must leave the layout.** Rule 2 forbids `display: none`, so use
+   `position: fixed` plus opacity. Otherwise your hidden drawer occupies its full width
+   forever and shoves everything below it off screen.
 
-```javascript
-// 1. The auth callback. The manager calls this once at boot and expects a promise
-//    resolving to an object with these two fields, from YOUR backend. Minting a
-//    Trusted Access token needs a client id and secret, so it cannot happen in
-//    the browser.
-const getToken = async () => {
-  const r = await fetch('/api/composer-token');     // your endpoint, not Composer's
-  return await r.json();                            // { access_token, expires_in }
-};
+### The page
 
-// 2. The composite dashboard id. The URL in Composer shows accountId_dashId with an
-//    underscore. The embed manager wants a plus. Getting this wrong yields a
-//    dashboard that never resolves and no error worth reading.
-const accountId   = '65659d06b5ca0667ef2bb2d1';
-const dashId      = '69fce58b0b70396702ebcab0';
-const drawerDashId = '69fdf0ea0b70396702ebde32';
+```html
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="app.css">
+  <!-- The SDK loader. It has no `type`, and that is correct: it is not your code. -->
+  <script src="https://your-instance/discovery/embed/embed.js"
+          data-name="composer-embed-manager"></script>
+</head>
+<body>
+  <div id="filters"></div>
+  <div id="dash"></div>
 
-// 3. Containers, each with real dimensions BEFORE anything renders into it.
-//    A container sized auto, or hidden with display:none, measures zero and the
-//    component never paints.
-const dashEl   = document.getElementById('dash');
-const drawerEl = document.getElementById('drawer');       // the panel that slides in
-const drawerBody = document.getElementById('drawer-body'); // where the component renders
-const botEl    = document.getElementById('bot');
-const panel    = botEl;                                   // whatever you show and hide
+  <!-- hidden but laid out, and out of flow: see rule 3 -->
+  <aside id="drawer" class="panel is-hidden"><div id="drawer-body"></div></aside>
+  <aside id="bot"    class="panel is-hidden"></aside>
 
-// 4. Your own handlers. The SDK gives you the event; what you do with it is yours.
-const openInDashboard = (visParams) => { /* ... */ };
-const showContextMenu = (detail)   => { /* ... */ };
+  <!-- type="module" is required. Without it, top-level await is a syntax error
+       and nothing on this page runs at all. -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
 ```
 
 ```css
-/* Hidden but laid out. This is the whole trick: the element keeps its box. */
-#drawer, #bot { width: 480px; height: 100%; transition: opacity .15s; }
-.opacity-0 { opacity: 0; }
-.pointer-events-none { pointer-events: none; }
+/* Rule 2: every render target needs height, and percentage height needs an
+   unbroken chain to the root. Omitting these two lines is the single most
+   common way an embed silently never paints. */
+html, body { height: 100%; margin: 0; }
+#dash      { width: 100%; height: calc(100% - 48px); }
+#filters   { height: 48px; }
+
+/* Rule 3: out of flow, so hiding it does not reserve space. */
+.panel     { position: fixed; top: 0; right: 0; width: 480px; height: 100%;
+             transition: opacity .15s; }
+#drawer-body { width: 100%; height: 100%; }   /* the panel is sized; its body is not */
+.is-hidden { opacity: 0; pointer-events: none; }
 ```
 
-### The one thing to get right first: render once
-
-Boot the manager once on auth-ready, create each component once, render each once. Show and
-hide with CSS.
-
-Calling `render()` a second time on an initialised component aborts every in-flight SDK
-request and reinitialises, which presents as a permanent loading spinner with nothing in the
-console. `display: none` causes the same thing for a different reason: a container with no
-box has no dimensions, and the component measures zero and never paints.
-
 ```javascript
-// hide
-panel.classList.add('opacity-0', 'pointer-events-none');
-// show
-panel.classList.remove('opacity-0', 'pointer-events-none');
-```
+// app.js  (loaded with type="module")
 
-`destroy()` exists and is correct for genuine teardown, when the host page or route is
-unmounting. It is not a close handler.
+// Your endpoint, not Composer's. Minting a Trusted Access token needs a client
+// id and secret, so it cannot happen in the browser.
+const getToken = async () => (await fetch('/api/composer-token')).json();  // {access_token, expires_in}
 
-### Filter bar driving the dashboard
+// The URL in Composer shows accountId_dashId with an underscore. The embed
+// manager wants a plus. Wrong separator gives a dashboard that never resolves.
+const ACCOUNT = '65659d06b5ca0667ef2bb2d1';
+const DASH    = '69fce58b0b70396702ebcab0';
+const DRAWER  = '69fdf0ea0b70396702ebde32';
 
-Two mechanisms, and they are not interchangeable.
+const dashEl = document.getElementById('dash');
+const drawerEl = document.getElementById('drawer');
+const drawerBody = document.getElementById('drawer-body');
+const botEl = document.getElementById('bot');
 
-**`initialFilters`** sets the state a component boots with. It is read by the SDK. Use it for
-the first paint, never for a later change, because changing it means re-rendering.
-
-**`publish()`** changes a live component. This is the one to use for a filter bar.
-
-```javascript
 const manager = await window.initComposerEmbedManager({ getToken });
 
+// --- primary dashboard -------------------------------------------------
 const dashboard = await manager.createComponent('dashboard', {
-  dashboardId: `${accountId}+${dashId}`,   // NB: plus, not the underscore the URL uses
+  dashboardId: `${ACCOUNT}+${DASH}`,
   interactivityProfileName: 'interactive',
-  initialFilters: [{ path: 'region', operation: 'IN', value: ['EMEA'] }]
+  // NOT an array. The SDK reads this only when it has `sourceId` AND one of
+  // `timeFilter` / `filters`; anything else is silently discarded, exactly the
+  // way forTopic is. It becomes querystring `inheritSourceId` on the route.
+  initialFilters: {
+    sourceId: '69fce5780b70396702ebca7a',
+    filters: [{ path: 'region', operation: 'IN', value: ['EMEA'] }]
+  }
 });
-await dashboard.render(dashEl, { width: '100%', height: '100%' });
+// render() is NOT async: the SDK's own code does
+// `(await t.createComponent(...)).render(...)`, awaiting the create and not
+// the render. Awaiting it returns undefined immediately and tells you nothing
+// about painting. Use composer-dashboard-loaded if you need a signal.
+dashboard.render(dashEl, { width: '100%', height: '100%' });
 
-// later, from your own filter UI
-manager.publish('region-filter', { path: 'region', operation: 'IN', value: ['APAC'] });
-```
-
-`publish(topic, message, options)` lives on the **manager**, not on the component. There is no
-`trigger` method on anything; reaching for one is the most common way this goes wrong.
-
-The dashboard must be authored with a matching cross-visual link for the topic to land. If
-nothing happens and no error appears, that is the first thing to check.
-
-### Driving it from outside the SDK
-
-If your filter UI cannot reach the manager instance, dispatch the event the SDK dispatches.
-The event **name** is `EMBED/CUSTOM_EVENT`. `EMBED/PUBLISH` is the `type` inside it, and is
-never an event name:
-
-```javascript
-document.dispatchEvent(new CustomEvent("EMBED/CUSTOM_EVENT", {
-  detail: { type: "EMBED/PUBLISH", data: { topic, message, options } },
-  bubbles: true
-}));
-```
-
-`options` is forwarded opaquely by the loader, so keys inside it such as `targetComponents`
-and `publisherId` are interpreted by the embedded application rather than by `embed.js`.
-Their behaviour is **not verifiable from the SDK bundle** and rests on field notes; treat them
-as unconfirmed until you have watched them work on your own instance.
-
-`forTopic` inside `initialFilters` is a different case: the SDK has no such key, so JavaScript
-accepts it silently and it does nothing at all. Do not reach for it.
-
-### Side drawer and modal
-
-Both are a second dashboard component filtered to the row the user clicked. The drawer suits
-comparison, because the parent stays visible. The modal suits focus.
-
-The rules that matter are the same for both, and all three come from the render-once
-constraint above:
-
-1. Create and render the secondary component **once**, at boot, inside its hidden container.
-2. Give the container real dimensions before render, never `display: none` and never `auto`.
-3. Push the row context with `publish()` when the user opens it. Do not re-render.
-
-```javascript
+// --- drawer: created and rendered ONCE, at boot, into its hidden panel ---
 const drawer = await manager.createComponent('dashboard', {
-  dashboardId: `${accountId}+${drawerDashId}`,
+  dashboardId: `${ACCOUNT}+${DRAWER}`,
   interactivityProfileName: 'readonly',
-  header: { visible: false }
+  header: { visible: false },
+  // A secondary embed with its own time bar gives the user two competing
+  // time controls. TIMEBAR_PANEL and TIMEBAR_FIELD are both SDK-recognised.
+  interactivityOverrides: { visualSettings: { TIMEBAR_PANEL: false } }
 });
-await drawer.render(drawerBody, { width: '100%', height: '100%' });
-drawerEl.classList.add('opacity-0', 'pointer-events-none');   // hidden, but laid out
+drawer.render(drawerBody, { width: '100%', height: '100%' });
 
-function openDrawer(row) {
-  manager.publish('drawer-context', { path: 'account_id', operation: 'IN', value: [row.id] });
-  drawerEl.classList.remove('opacity-0', 'pointer-events-none');
-}
-```
-
-A secondary embed should be `readonly` and should hide its time bar, otherwise the user gets
-two competing time controls on one screen.
-
-### Opening a chatbot answer as a visual
-
-The chatbot emits `composer-chat-visual-received` carrying the parameters of the visual it
-built. Catch it and hand it to the dashboard rather than making the user rebuild it.
-
-```javascript
+// --- chatbot -----------------------------------------------------------
 const bot = await manager.createComponent('chat-bot', { theme: '__platform__' });
-await bot.render(botEl, { width: '100%', height: '100%' });
+bot.render(botEl, { width: '100%', height: '100%' });
 
-botEl.addEventListener('composer-chat-visual-received', (e) => {
+// --- filtering ---------------------------------------------------------
+// initialFilters sets the boot state and is read by the SDK. publish() changes
+// a LIVE component and is what a filter bar uses. publish lives on the MANAGER;
+// there is no `trigger` method on anything.
+const applyFilters = (filters) =>
+  manager.publish('region-filter', filters);      // array or single object
+
+document.getElementById('filters').addEventListener('change', (e) => {
+  const v = e.target.value;
+  // Clearing: publish an empty array rather than omitting the call.
+  applyFilters(v ? [{ path: 'region', operation: 'IN', value: [v] }] : []);
+});
+
+// The dashboard must be authored with a cross-visual link on this topic, or the
+// publish lands nowhere and nothing errors. See "Cross-Source Links" above.
+
+// Sync the bar back when the dashboard filters itself internally.
+const unsubscribe = manager.subscribe('region-filter', (msg) => reflectInBar(msg));
+
+// --- drill-through -----------------------------------------------------
+// Listen on the COMPONENT. Every component class ships
+// `addEventListener(e,t){this.htmlElement.addEventListener(e,t)}`, proxying onto
+// its own element. Do not use the container you passed to render(): the SDK
+// appends htmlElement as a CHILD of it, so a container listener only fires if
+// the event bubbles, which embed.js does not establish.
+dashboard.addEventListener('composer-visual-series-clicked', (e) => {
+  // The detail shape is set by the embedded application, not the loader, so it
+  // is NOT verifiable from the SDK bundle. Log it once on your own instance
+  // before relying on a field name.
+  console.log('series-clicked detail', e.detail);
+  openDrawer(e.detail);
+});
+
+function openDrawer(detail) {
+  const id = detail?.filters?.[0]?.value?.[0];   // confirm against your own log first
+  if (id == null) return;                        // never publish a null filter
+  manager.publish('drawer-context', [{ path: 'account_id', operation: 'IN', value: [id] }]);
+  drawerEl.classList.remove('is-hidden');
+}
+
+// --- chatbot handoff ---------------------------------------------------
+bot.addEventListener('composer-chat-visual-received', (e) => {
+  // visParams does not appear in the SDK bundle: it comes from the embedded
+  // app. Not verifiable from the loader; confirm the name on your instance.
   const visParams = e.detail?.visParams;
   if (visParams) openInDashboard(visParams);
 });
+
+// --- tokens: there is nothing to do here -----------------------------
+// The SDK re-mints on its own. It calls getToken, reads expires_in, and
+// schedules itself again 60s before expiry, recursively, forever. A wall
+// display does not outlive its first token.
+//
+// So do NOT write a refresh handler. Two specific traps if you try:
+//   * composer-init-failed is dispatched inside initComposerEmbedManager,
+//     BEFORE the manager is constructed, so `manager` is still in the temporal
+//     dead zone and your handler throws. It also cannot signal mid-session
+//     expiry: the probe that raises it runs exactly once, at boot.
+//   * initializeToken() is `initializeToken(){this.updateToken()}`, not async
+//     and with no return, so awaiting it resolves immediately.
+//
+// The one thing you MUST get right is expires_in. The SDK computes
+// `expires_in * 1000 - 60000`; omit it and that is NaN, setTimeout coerces NaN
+// to 0, and you get a tight loop hammering your own token endpoint.
+
+function reflectInBar(_msg) { /* your filter bar UI */ }
+function openInDashboard(_visParams) { /* open the visual, or save then embed it */ }
 ```
 
-Two traps. Fourteen of the fifteen chatbot events use the `composer-chat-` prefix and one,
-`composer-bot-suggestions-failed`, uses `composer-bot-`, so a listener loop built by
-concatenating onto the common stem drops suggestion failures silently. And the chatbot obeys
-the `symphony` block of the theme: a theme without one renders the bot in internal defaults
-next to your branded dashboard, with nothing in any log.
+### The modal, and how it differs
 
-### Knowing what the user clicked
+A modal is the same component in a centred overlay: created once, rendered once, shown with
+the same class toggle. Use the drawer when the user needs the parent visible for comparison,
+and the modal when they need to stop and focus. The only real difference is the CSS box and
+that a modal usually takes a backdrop.
 
-The drawer and modal above need a click to react to. The SDK emits these, and they are the
-whole drill-through mechanism:
+### Traps this section exists to record
+
+- **`forTopic`** inside `initialFilters` is not a key the SDK knows. JavaScript accepts it
+  and it does nothing at all, silently.
+- **`composer-unauthorized`** is declared once in the bundle and dispatched nowhere. A
+  listener on it waits forever. Use `composer-init-failed`, on `document`.
+- **There are no export events.** `EXPORT` exists only as an interactivity flag, so there is
+  no start, completion or progress to hook. An earlier draft of this section documented
+  `composer-export-started` and `composer-export-completed`; both were invented, and the SDK
+  check caught them.
+- **Sixteen chatbot events, not fifteen.** Fifteen use the `composer-chat-` prefix and one,
+  `composer-bot-suggestions-failed`, uses `composer-bot-`. A listener loop built by
+  concatenating onto the common stem drops suggestion failures.
+- **`interactivityProfileName`** accepts `interactive`, `readonly`, `embedded`, `linked` and
+  `lite`.
+- **`symphony`, `__platform__` and `visParams` all appear zero times in the SDK bundle.**
+  In `embed.js`, `theme` is a plain string interpolated into an element id and a scoped CSS
+  selector; it has no blocks. Everything claimed about theme structure or about the shape of
+  a chatbot event payload comes from the embedded application, **not verifiable from the SDK
+  bundle**, and is on the same footing as `targetComponents` and `publisherId`. Log the event
+  on your own instance before depending on a field name.
+
+### Driving it without a manager reference
+
+If your filter UI cannot reach the manager, dispatch what the SDK dispatches. The event
+**name** is `EMBED/CUSTOM_EVENT`; `EMBED/PUBLISH` is the `type` inside it and is never an
+event name:
 
 ```javascript
-// Listen on the CONTAINER, not on the component object. The SDK binds its own
-// listeners with `this.htmlElement.addEventListener(...)`, so the element you
-// rendered into is what emits. `dashboard.addEventListener(...)` silently never
-// fires: the component is not an EventTarget.
-dashEl.addEventListener('composer-visual-series-clicked', (e) => {
-  openDrawer(e.detail);          // a bar, slice or point within a visual
-});
-dashEl.addEventListener('composer-visual-right-clicked', (e) => {
-  showContextMenu(e.detail);     // your own menu, if the built-in one does not fit
-});
+function publishWithoutManager(topic, message, options = {}) {
+  document.dispatchEvent(new CustomEvent("EMBED/CUSTOM_EVENT", {
+    detail: { type: "EMBED/PUBLISH", data: { topic, message, options } },
+    bubbles: true
+  }));
+}
 ```
 
-`composer-visual-clicked` fires for the visual as a whole, `composer-visual-series-clicked`
-for a specific series point, and there are `-touched` and `-long-touched` variants for
-touch devices. `composer-visual-rendered` tells you a visual has actually painted, which is
-the honest signal to hide a loading state; `composer-dashboard-loaded` fires earlier and does
-not mean the visuals are up.
-
-### Handling a token the server will not accept
-
-When `getToken` returns something Composer rejects, the SDK dispatches
-**`composer-init-failed`** on `document`. Not on your container, and not on the component.
-
-```javascript
-document.addEventListener('composer-init-failed', async () => {
-  await manager.initializeToken();   // re-mint through your getToken callback
-});
-```
-
-`initializeToken()` is a real method on the manager: the constructor calls it once when a
-`getToken` is supplied, and calling it again re-runs that callback.
-
-**A trap worth knowing.** The SDK declares a constant `composer-unauthorized` and never
-dispatches it. It appears exactly once in the bundle, in an enum next to
-`composer-init-failed`, and nothing fires it. A listener bound to it will wait forever, and
-the symptom is an embed that quietly stops updating. Use `composer-init-failed`.
-
-This matters more than it sounds. `getToken` is called once at boot, so a long-lived page, a
-dashboard on a wall display, or a user returning from lunch will all outlive the first token.
-
-### Export
-
-There are no export events in the SDK. `EXPORT` exists only as an interactivity flag you can
-turn on or off per component, so there is nothing to hook: no start, no completion, no
-progress. If you need a branded PDF, the branding has to be part of the dashboard or applied
-afterwards by your own pipeline.
-
-An earlier draft of this section documented `composer-export-started` and
-`composer-export-completed`. Neither exists. They were plausible and invented, and the SDK
-check caught them, which is the reason that check exists.
+`options` is forwarded opaquely by the loader, so keys inside it such as `targetComponents`
+and `publisherId` are interpreted by the embedded application. Their behaviour is **not
+verifiable from the SDK bundle**; treat them as unconfirmed until you have watched them work.
 
 ### What this does not cover
 
-Write-back. Composer writes back through upload-backed sources and the OData surface, not
-through the embed SDK, so it is an API concern rather than a client-side assembly one. See
-`WRITEBACK_ODATA.md` in `isw-da/composer-mcp`.
+Write-back. Composer writes back through upload-backed sources and the OData surface rather
+than the embed SDK, so it is an API concern. See `WRITEBACK_ODATA.md` in `isw-da/composer-mcp`.
 
 ## Embedding Reference
 
@@ -844,10 +851,10 @@ const component = await manager.createComponent('dashboard', {
   theme: '__platform__',
   header: { showActions: false, showTitle: false, visible: false }
 });
-await component.render(document.getElementById('container'), {
+component.render(document.getElementById('container'), {
   width: '100%',
   height: '100%'
-});
+});   // render() is not async; see Client-Side Assembly above
 ```
 
 ### Key Embedding Points
