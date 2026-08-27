@@ -19,6 +19,11 @@ sec = SKILL[SKILL.index("## Client-Side Assembly"):SKILL.index("## Embedding Ref
 js = "\n\n".join(re.findall(r"```javascript\n(.*?)```", sec, re.S))
 css = "\n".join(re.findall(r"```css\n(.*?)```", sec, re.S))
 html = "\n".join(re.findall(r"```html\n(.*?)```", sec, re.S))
+# Strip HTML comments before checking. The comment explaining WHY type="module"
+# is required otherwise satisfies the check for type="module", so removing the
+# attribute from the actual script tag goes unnoticed. Third instance today of
+# a check matching a warning as though it were the thing warned about.
+html_code = re.sub(r"<!--.*?-->", "", html, flags=re.S)
 
 fails = []
 
@@ -31,7 +36,7 @@ with tempfile.TemporaryDirectory() as d:
     if r.returncode != 0:
         fails.append(f"the assembled code does not parse as a module: {r.stderr.strip()[:200]}")
 
-if "await " in js and 'type="module"' not in html:
+if "await " in js and 'type="module"' not in html_code:
     fails.append('the code uses top-level await but the HTML does not load it with type="module"; '
                  'in a classic script that is a syntax error and nothing on the page runs')
 
