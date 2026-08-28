@@ -64,11 +64,38 @@ for m in re.finditer(r'CustomEvent\(\s*["\']([^"\']+)["\']', SKILL):
     if m.group(1) != "EMBED/CUSTOM_EVENT":
         fails.append(f"CustomEvent named '{m.group(1)}'; the SDK only dispatches EMBED/CUSTOM_EVENT")
 
-# 4. any method called on a component or manager must exist in the SDK
-for m in sorted(set(re.findall(r"(?:component|manager|dashboardComponent|embedManager)\.([a-zA-Z_$][\w$]*)\s*\(", SKILL))):
+# 4. any method called on a component or manager must exist in the SDK.
+#
+#    Receivers are DERIVED from the skill, not hand-listed. The hand-listed
+#    version read `component|manager|dashboardComponent|embedManager`, which
+#    matched the boilerplate example and missed every call in Client-Side
+#    Assembly, where the components are named `dashboard`, `drawer` and `bot`.
+#    Three real render() calls went unchecked, and the count stayed high only
+#    because a duplicated example propped it up. Deriving the names means a new
+#    variable in the assembly is covered the day it is written.
+RECEIVERS = {"component", "manager", "dashboardComponent", "embedManager"}
+RECEIVERS |= set(re.findall(
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+[A-Za-z_$][\w$.]*\.createComponent\s*\(", SKILL))
+RECEIVERS |= set(re.findall(
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+window\.initComposerEmbedManager\s*\(", SKILL))
+_recv = "|".join(sorted(re.escape(r) for r in RECEIVERS))
+
+for m in sorted(set(re.findall(rf"(?:{_recv})\.([a-zA-Z_$][\w$]*)\s*\(", SKILL))):
     checked += 1
     if m not in sdk_methods:
         fails.append(f"method .{m}() called in SKILL.md but not present in the SDK")
+
+# 4b. A call the gate cannot attribute to a known receiver is not a pass, it is
+#     an unchecked claim. Silent loss of coverage is how this gate reported 20
+#     green claims while three render() calls sat unverified.
+for m in re.finditer(r"([A-Za-z_$][\w$]*)\.(render|createComponent|publish|subscribe|refreshComponent)\s*\(", SKILL):
+    line = SKILL[SKILL.rfind("\n", 0, m.start()) + 1 : m.start()].strip()
+    if line.startswith("//") or line.startswith("*"):
+        continue          # prose about a call, not a call
+    if m.group(1) not in RECEIVERS:
+        checked += 1
+        fails.append(f".{m.group(2)}() is called on `{m.group(1)}`, which this gate cannot "
+                     f"tie to a component or manager, so the call goes unverified")
 
 # 5. Config keys split by whether the SDK could possibly know them.
 #

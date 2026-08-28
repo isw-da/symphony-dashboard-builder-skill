@@ -829,42 +829,21 @@ than the embed SDK, so it is an API concern. See `WRITEBACK_ODATA.md` in `isw-da
 
 ## Embedding Reference
 
-Logi Symphony supports true iframeless embedding via the Embed Manager JavaScript API.
+The embed SDK surface is documented once, in `isw-da/composer-mcp`, and deliberately not
+repeated here:
 
-### Setup
+- `EMBEDDING.md`: the embed model, CORS and CSRF, white-labelling
+- `EMBEDDING_API.md`: Embed Manager and component methods, config keys, and which keys ride
+  through `publish()` opaquely rather than being read by the SDK
+- `EMBEDDING_RUNTIME.md`: token exchange, refresh, and the runtime failure modes
 
-```html
-<script src="https://your-instance.com/discovery/embed/embed.js"
-        data-name="composer-embed-manager"></script>
-```
-
-### Embed a Dashboard
-
-```javascript
-const getToken = async () => {
-  // Return {access_token, expires_in} from your auth endpoint
-};
-const manager = await window.initComposerEmbedManager({ getToken });
-const component = await manager.createComponent('dashboard', {
-  dashboardId: 'your-dashboard-id',
-  interactivityProfileName: 'interactive',
-  theme: '__platform__',
-  header: { showActions: false, showTitle: false, visible: false }
-});
-component.render(document.getElementById('container'), {
-  width: '100%',
-  height: '100%'
-});   // render() is not async; see Client-Side Assembly above
-```
-
-### Key Embedding Points
-- Content renders directly into your DOM — no iframes
-- Container element must have explicit dimensions (not `auto`)
-- Cross-origin requires CORS configuration on the Symphony server
-- Same-origin requires CSRF token on mutating requests (`X-CSRF-TOKEN` from `<meta name="_csrf">`)
-- White-labeling and CSS theming are fully supported
+`## Client-Side Assembly` above stays here, because the assembled page is what this skill
+produces. What the SDK itself provides lives in one place. This section used to restate it,
+which meant two documents had to stay true about the area where this documentation has
+already been wrong most often.
 
 ---
+
 
 ## Export-Then-Modify Workflow (Alternative for Complex Dashboards)
 
