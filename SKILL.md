@@ -605,6 +605,21 @@ Every symbol below is checked against the embed SDK served by a running Composer
 `_run/verify-runnable.py`, parses this code as a module, fails on an object-literal shorthand
 that is not in scope, and checks that every render target has a height rule.
 
+### Rule 0: your origin must be allowlisted on the server before any of this runs
+
+Loaded from an origin Composer does not know, this page produces a blank white screen and
+three console lines, and nothing below rule 0 gets a chance to be wrong. Verified on a live
+26.2.0 by serving the page from `http://127.0.0.1:<port>` and loading it: the manager's boot
+probe of `/api/version` fails the preflight with `No 'Access-Control-Allow-Origin' header is
+present`, and `await initComposerEmbedManager` never resolves. A plain `GET` of the same URL
+carrying only an `Origin` header answers `403 Invalid CORS request`, so this is a server-side
+allowlist and no amount of client code gets round it.
+
+Add your origin to Composer's allowlist first, or serve the page from the same origin as
+Composer (a reverse proxy in front of both works, and is how the checks below were run).
+Confirm it before you debug anything else: `curl -i -H 'Origin: https://your-app' \
+https://your-instance/discovery/api/version` must not say `Invalid CORS request`.
+
 ### The four rules everything else follows from
 
 1. **Render once.** Calling `render()` again re-appends the loader, appends a second
@@ -685,7 +700,24 @@ const drawerEl = document.getElementById('drawer');
 const drawerBody = document.getElementById('drawer-body');
 const botEl = document.getElementById('bot');
 
-const manager = await window.initComposerEmbedManager({ getToken });
+// Boot can fail, and unguarded it fails invisibly. Verified on a live 26.2.0:
+// with a token the server rejects, the SDK throws the raw fetch `Response` for
+// /api/version, the await never resolves, every line below this one never runs,
+// and the user sees an entirely blank page. With a getToken that returns no
+// `access_token` at all, the SDK throws your token object instead and
+// composer-init-failed does not fire. Catch both and put something on screen.
+let manager;
+try {
+  manager = await window.initComposerEmbedManager({ getToken });
+} catch (err) {
+  // err is a Response on a rejected token, your own object on a malformed one.
+  const why = (err && err.status) ? `token rejected (${err.status})` : 'no usable token';
+  document.getElementById('dash').textContent = `Dashboard unavailable: ${why}`;
+  throw err;
+}
+// composer-init-failed does fire on `document` for the rejected-token case, but
+// its detail is null, so it tells you that boot failed and nothing about why.
+document.addEventListener('composer-init-failed', () => console.error('embed boot failed'));
 
 // --- primary dashboard -------------------------------------------------
 const dashboard = await manager.createComponent('dashboard', {

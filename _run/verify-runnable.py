@@ -65,6 +65,23 @@ if not re.search(r"html,\s*body[^{]*\{[^}]*height", css):
 if not re.search(r"\.panel[^{]*\{[^}]*position:\s*(fixed|absolute)", css):
     fails.append("the hidden panel is in normal flow, so it reserves its full box even when hidden")
 
+# 4. boot must be guarded. Loading this page against a live 26.2.0 with a token
+#    the server rejects gives a blank white screen: the SDK throws the raw
+#    Response for /api/version, the top-level await never resolves, and every
+#    line after it is dead. Unguarded, the reader's only symptom is nothing.
+init = re.search(r"initComposerEmbedManager\s*\(", js)
+if init and not re.search(r"try\s*\{[^}]*initComposerEmbedManager", js, re.S):
+    fails.append("initComposerEmbedManager is awaited without a try/catch; when the token is "
+                 "rejected the SDK throws and the page stays blank with no message")
+
+# 5. the CORS precondition must be stated. It is the first thing that stops this
+#    page working from any origin Composer does not already know, and it is not
+#    fixable from the client. A section that omits it sends the reader to debug
+#    render targets when the boot probe never got a response at all.
+if not re.search(r"Invalid CORS request|Access-Control-Allow-Origin", sec):
+    fails.append("the section never states the CORS precondition; from a non-allowlisted "
+                 "origin the boot probe is refused and nothing on the page renders")
+
 print(f"assembled: {len(js.splitlines())} lines of js, {len(css.splitlines())} of css")
 print()
 if fails:
