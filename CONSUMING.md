@@ -44,7 +44,9 @@ One skill, `SKILL.md`, in two halves.
 
 `_run/embed-26.2.1.js` is the embed SDK pulled from a running Composer 26.2.1 instance. It is
 committed on purpose. It is what the SDK gate reads, so the gate answers from the shipped
-bundle rather than from another document that might be repeating the same mistake.
+bundle rather than from another document that might be repeating the same mistake. It is
+insightsoftware's own shipped file, held here as verification evidence and not offered for
+reuse; `NOTICE` at the repo root sets out what that means and where to get the SDK properly.
 
 Install it as a Claude Code skill by copying the repo into `~/.claude/skills/`, or point a
 session at `SKILL.md` directly.
@@ -69,17 +71,14 @@ and silently ignored, `EMBED/PUBLISH` presented as an event name when the SDK ca
 an inner discriminator, and an assembled page that hit four blockers before anything
 rendered. If a gate is red, the documentation is wrong, not the gate.
 
-Some checks report **NOT APPLICABLE** rather than passing or failing. That means the thing
-they check is real but not present in your checkout, usually because it is internal material
-that is never published. A skip is always named and counted, never silent.
-
 ## What is deliberately not here
 
 - **No Composer instance, and no credentials for one.** The gates run against the committed
   SDK bundle, never against a server. Nothing here will authenticate anywhere.
-- **No customer names, deployed customer artefacts, or NDA-tagged material.** Where a real
-  deployment is used as evidence it appears as "deployed theme A", and the identifying copy
-  stays in a private working tree.
+- **No customer names, deployed customer artefacts, or NDA-tagged material.** The account
+  and dashboard ids in the client-side example are opaque object ids used to show the
+  `accountId+dashId` form the embed manager wants; they name no customer and resolve on no
+  instance you can reach.
 - **No generated dashboard JSON.** The skill produces it per interview; committing a sample
   would rot against the API and invite copying rather than asking.
 

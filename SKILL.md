@@ -5,7 +5,9 @@ description: Build Logi Symphony (Composer) dashboard configuration files via co
 
 # Symphony Dashboard Builder
 
-Generate importable Logi Symphony (Composer) dashboard configurations through a structured interview, then output JSON files the user can import via the Composer API or UI.
+Generate importable Logi Composer dashboard configurations through a structured interview, then output JSON files the user can import via the Composer API or UI.
+
+**Naming.** The product is Logi Composer. "Logi Symphony" is the deprecated name and survives here in the skill name and in the trigger list above, because that is still what people type. Read every "Symphony" you meet in Composer's own documentation as Composer.
 
 ## Why This Skill Exists
 
@@ -35,11 +37,16 @@ const items = Array.isArray(raw) ? raw : (raw.content || raw.items || raw.data |
 
 ### API Base Path
 
-The API lives at `{instanceUrl}/discovery/api/...` — not `/composer/api/...`.
+The API lives under a context path that depends on how Composer was deployed:
+
+- `{instanceUrl}/composer/api/...` for standalone Composer
+- `{instanceUrl}/discovery/api/...` for the Simba Intelligence bundled deployment
+
+An earlier version of this skill said `/discovery` was the path and `/composer` was wrong. That was written from one bundled instance and is false on a standalone one. Check which you have before you copy a base URL: `isw-da/composer-mcp` carries the same split in its `COMPOSER_CONTEXT_PATH` setting, which defaults to `/composer`.
 
 ### API Version
 
-This skill targets the **Composer v25 API**. Earlier versions may have different endpoint paths or missing features (e.g., dashboard import/export was added in later versions). If the user's instance is on an older version, the export-modify-import workflow may not be available — fall back to individual `POST /api/dashboards` calls.
+The server-side half of this skill was confirmed against the **Composer v25 API**, and the client-side assembly half is checked against the embed SDK shipped by Composer **26.2.1** (`_run/embed-26.2.1.js`). Nothing here has been re-run end to end against a 26.x server, so treat the v25 API shapes as evidence from v25 rather than as a claim about every release. Earlier versions may have different endpoint paths or missing features (dashboard import/export, for one, arrived later). If the user's instance is older, the export-modify-import workflow may not be available; fall back to individual `POST /api/dashboards` calls.
 
 ### Authentication Patterns
 
@@ -50,7 +57,7 @@ This skill targets the **Composer v25 API**. Earlier versions may have different
 
 ### Admin Users Bypass RLS
 
-Admin and supervisor users bypass forced filters entirely. When testing or demoing row-level security, always use non-admin viewer accounts. This is the single most common gotcha in Symphony implementations.
+Admin and supervisor users bypass forced filters entirely. When testing or demoing row-level security, always use non-admin viewer accounts. This is the single most common gotcha in Composer implementations.
 
 ---
 
@@ -222,7 +229,7 @@ Start with the three most important questions. Do NOT dump all questions at once
 
 1. **Do you have an existing working dashboard you could export?** This is an alternative reliable path. If yes → go to the Export-Modify-Import workflow (see later section).
 
-2. **What is your Composer instance URL?** (e.g., `https://yourcompany.logi-symphony.com`) — and do you have admin/supervisor access?
+2. **What is your Composer instance URL, and which context path does it use** (`/composer` standalone, `/discovery` bundled)? Do you have admin/supervisor access?
 
 3. **Do you already know your source IDs and field names, or do you need help discovering them?** If they don't know, provide the discovery script (Phase 1b).
 
@@ -242,12 +249,16 @@ If building from scratch, ask:
 If the user doesn't know their instance state, provide this script to run in their browser console while logged into Composer:
 
 ```javascript
-// === Symphony Instance Discovery ===
+// === Composer Instance Discovery ===
 // Run this in your browser console while logged into Composer
 // It outputs everything Claude needs to generate your dashboard config
 
 (async () => {
-  const BASE = window.location.origin + '/discovery';
+  // Context path: '/composer' on standalone Composer, '/discovery' on the
+  // Simba Intelligence bundle. Derived from the page you are logged into, so
+  // this works on either without editing.
+  const CTX = location.pathname.startsWith('/composer') ? '/composer' : '/discovery';
+  const BASE = window.location.origin + CTX;
   const CT = 'application/vnd.composer.v3+json';
 
   // Get CSRF token for same-origin requests
@@ -340,7 +351,7 @@ Generate a single browser console script that:
 4. Creates the dashboard referencing those visual IDs
 5. Prints the dashboard URL and cleanup instructions
 
-**IMPORTANT**: Always output scripts as downloadable `.js` files — never in markdown code blocks. Markdown formatting (backticks, smart quotes) corrupts scripts when users paste them into the console.
+**IMPORTANT**: Always write scripts out as `.js` files rather than putting them in markdown code blocks. Markdown formatting (backticks, smart quotes) corrupts scripts when users paste them into the console.
 
 ### Phase 4: Verification
 
@@ -590,16 +601,20 @@ section was snippets and a reviewer who assembled them hit four separate blocker
 anything rendered.
 
 Every symbol below is checked against the embed SDK served by a running Composer 26.2.1
-(`/discovery/embed/embed.js`) by `_run/verify-against-sdk.py`, which also parses this code as
-a module and fails on an undefined reference.
+(`/discovery/embed/embed.js`) by `_run/verify-against-sdk.py`. A second gate,
+`_run/verify-runnable.py`, parses this code as a module, fails on an object-literal shorthand
+that is not in scope, and checks that every render target has a height rule.
 
-### The three rules everything else follows from
+### The four rules everything else follows from
 
 1. **Render once.** Calling `render()` again re-appends the loader, appends a second
-   `<style>` block, and re-initialises the same component instance. (It does not abort
-   in-flight requests: there is no such code, and an earlier draft of this section said there
-   was.) If you genuinely need to re-render, use `manager.refreshComponent(id)`, which
-   destroys first. Otherwise boot once, render once, show and hide with CSS.
+   `<style>` block, and re-initialises the same component instance. It aborts nothing:
+   `render()` is `render(e,t){t&&(this.elementAttributes=t),this.addLoader(),
+   this.addRootClassNames(e),this.addRootStyles(this.elementAttributes),this.renderer(this,e)}`,
+   and the bundle's only `AbortController` belongs to the chat-bot's api-ready listener,
+   nowhere near a data request. An earlier draft of this section said a re-render cancelled
+   in-flight requests. If you genuinely need to re-render, use `manager.refreshComponent(id)`,
+   which destroys first. Otherwise boot once, render once, show and hide with CSS.
 2. **Every render target needs a real box before you render into it.** Not `auto`, not
    `display: none`. A zero-height container measures zero and never paints, and looks exactly
    like rule 1 being broken.
@@ -626,7 +641,7 @@ a module and fails on an undefined reference.
   <div id="filters"></div>
   <div id="dash"></div>
 
-  <!-- hidden but laid out, and out of flow: see rule 3 -->
+  <!-- hidden but laid out, and out of flow: see rule 4 -->
   <aside id="drawer" class="panel is-hidden"><div id="drawer-body"></div></aside>
   <aside id="bot"    class="panel is-hidden"></aside>
 
@@ -645,7 +660,7 @@ html, body { height: 100%; margin: 0; }
 #dash      { width: 100%; height: calc(100% - 48px); }
 #filters   { height: 48px; }
 
-/* Rule 3: out of flow, so hiding it does not reserve space. */
+/* Rule 4: out of flow, so hiding it does not reserve space. */
 .panel     { position: fixed; top: 0; right: 0; width: 480px; height: 100%;
              transition: opacity .15s; }
 #drawer-body { width: 100%; height: 100%; }   /* the panel is sized; its body is not */
@@ -702,6 +717,10 @@ const drawer = await manager.createComponent('dashboard', {
 drawer.render(drawerBody, { width: '100%', height: '100%' });
 
 // --- chatbot -----------------------------------------------------------
+// `__platform__` appears zero times in the SDK bundle: the loader interpolates
+// `theme` into an element id and a scoped CSS selector and never inspects the
+// value, so this name is interpreted by the embedded application and is NOT
+// verifiable from the SDK. See the traps below.
 const bot = await manager.createComponent('chat-bot', { theme: '__platform__' });
 bot.render(botEl, { width: '100%', height: '100%' });
 
@@ -718,8 +737,10 @@ document.getElementById('filters').addEventListener('change', (e) => {
   applyFilters(v ? [{ path: 'region', operation: 'IN', value: [v] }] : []);
 });
 
-// The dashboard must be authored with a cross-visual link on this topic, or the
-// publish lands nowhere and nothing errors. See "Cross-Source Links" above.
+// The dashboard must be authored with a cross-source link whose LABEL is this
+// topic, or the publish lands nowhere and nothing errors. There is no section
+// on authoring those in this skill; see EMBEDDING_RUNTIME.md in
+// isw-da/composer-mcp, which covers the label-to-field mapping.
 
 // Sync the bar back when the dashboard filters itself internally.
 const unsubscribe = manager.subscribe('region-filter', (msg) => reflectInBar(msg));
@@ -755,8 +776,8 @@ bot.addEventListener('composer-chat-visual-received', (e) => {
 
 // --- tokens: there is nothing to do here -----------------------------
 // The SDK re-mints on its own. It calls getToken, reads expires_in, and
-// schedules itself again 60s before expiry, recursively, forever. A wall
-// display does not outlive its first token.
+// schedules itself again 60s before expiry, recursively, forever. That is why
+// a wall display outlives its first token without any code from you.
 //
 // So do NOT write a refresh handler. Two specific traps if you try:
 //   * composer-init-failed is dispatched inside initComposerEmbedManager,
@@ -899,11 +920,11 @@ A dashboard's `dashboardLayout` only defines the grid positions of widgets. The 
 
 When generating dashboard configurations, always provide:
 
-1. **A `.js` file** — a single all-in-one browser console script that fetches templates, creates visuals, creates the dashboard, and prints the URL
+1. **A `.js` file**, a single all-in-one browser console script that fetches templates, creates visuals, creates the dashboard, and prints the URL
 2. **Cleanup instructions** — DELETE commands for rollback
 3. **Verification** — the script should print the dashboard URL on success
 
-**CRITICAL**: Always output scripts as downloadable files via `create_file` + `present_files`. Never output long scripts in markdown code blocks — they get corrupted when users paste them.
+**CRITICAL**: Always write scripts to a file on disk (the `Write` tool in Claude Code) and give the user the path. Never output long scripts in markdown code blocks; smart quotes and backtick handling corrupt them on the way to a browser console. `create_file` and `present_files` are claude.ai tool names and do not exist in Claude Code.
 
 Structure the output clearly:
 

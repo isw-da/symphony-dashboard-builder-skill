@@ -1,0 +1,66 @@
+NOTICE
+======
+
+This repository mixes material with two different owners, which is why it
+carries a NOTICE rather than a conventional open-source licence. Applying MIT
+or Apache here would purport to grant rights over a file that is not mine to
+grant.
+
+insightsoftware's shipped SDK, held here as evidence
+----------------------------------------------------
+`_run/embed-26.2.1.js` (44,422 bytes) is insightsoftware's own Embed SDK
+bundle. A running Logi Composer 26.2.1 instance served it from the embed
+loader path below `/discovery`, and it was copied here unmodified. It is not my
+code, and nothing in this repository licenses it.
+
+It is committed deliberately, for one purpose. `_run/verify-against-sdk.py`
+reads it, so that every claim this skill makes about an SDK method, event or
+config key is checked against shipped code rather than against another
+document. Documentation checked against documentation is how this skill came
+to teach a `trigger` method that does not exist, a `forTopic` key the SDK
+silently ignores, and `EMBED/PUBLISH` as an event name when the SDK carries it
+as an inner discriminator. Holding the bundle so a gate can read it is not a
+licence to redistribute it as a library.
+
+Stated plainly, so there is no room to read it any other way:
+
+- The file belongs to insightsoftware.
+- It is present as verification evidence and for nothing else.
+- It is not offered for reuse, redistribution, vendoring or bundling, and this
+  repository is not a distribution channel for the Composer Embed SDK.
+- Do not serve it from a page, ship it inside a product, or point a customer
+  at it.
+- If you want the SDK, take it from your own Composer instance: it is the
+  loader your server publishes under its `embed/` path, below `/composer` on
+  standalone Composer or below `/discovery` on the Simba Intelligence bundle.
+  The `<script src>` line in the client-side assembly section of SKILL.md shows
+  the full form. Use the build your own server serves: the copy held here is
+  pinned at 26.2.1 and will drift from every later release.
+
+Original work
+-------------
+Everything else here was written by Amin Hasan as insightsoftware work:
+`SKILL.md` (the interview flow, the API rules, the JSON templates and the
+client-side assembly section), both gates under `_run/`, the release workflow
+under `.github/`, and `README.md` and `CONSUMING.md`. Every commit in the
+history is mine, and no third party's work is folded into it. Colleagues are
+welcome to clone, fork, pin and open issues.
+
+insightsoftware material
+------------------------
+Logi Composer and Simba Intelligence are insightsoftware products. The API
+shapes, endpoint paths, error strings and event names recorded in `SKILL.md`
+are derived from insightsoftware's own documentation and from running
+instances. That underlying documentation remains
+insightsoftware's and is not relicensed by anything in this repository.
+
+Not here
+--------
+No customer name, no customer artefact and no credential ships in this
+repository. The account and dashboard ids in the client-side example are opaque
+object ids, shown to demonstrate the `accountId+dashId` form the embed manager
+expects; they identify no customer. Neither gate authenticates anywhere and
+neither reaches the network: they read files in this checkout, and
+`verify-runnable.py` additionally shells out to a local `node --check`.
+
+Contact a@hasan.co if something here should not be public.

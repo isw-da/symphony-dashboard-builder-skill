@@ -60,6 +60,9 @@ Both run from a fresh clone with no Composer and no network. `verify-runnable.py
 - `_run/embed-26.2.1.js`: the embed SDK pulled from a running Composer 26.2.1 instance, and what the SDK gate reads
 - `_run/verify-against-sdk.py`, `_run/verify-runnable.py`: the two gates
 - `CONSUMING.md`: how to depend on this repo
+- `NOTICE`: who owns what in here. The SDK bundle is insightsoftware's, held as
+  verification evidence and not offered for reuse. Read it before you copy that file
+  anywhere.
 
 ## See also
 
