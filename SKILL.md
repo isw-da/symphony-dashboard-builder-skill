@@ -46,7 +46,23 @@ An earlier version of this skill said `/discovery` was the path and `/composer` 
 
 ### API Version
 
-The server-side half of this skill was confirmed against the **Composer v25 API**, and the client-side assembly half is checked against the embed SDK shipped by Composer **26.2.1** (`_run/embed-26.2.1.js`). Nothing here has been re-run end to end against a 26.x server, so treat the v25 API shapes as evidence from v25 rather than as a claim about every release. Earlier versions may have different endpoint paths or missing features (dashboard import/export, for one, arrived later). If the user's instance is older, the export-modify-import workflow may not be available; fall back to individual `POST /api/dashboards` calls.
+The server-side half of this skill was first confirmed against the **Composer v25 API**, and on
+28 August 2026 the initial-visual workflow was re-run end to end against a live bundled
+**Composer 26.2.0**: `visual-types`, `initial-visual`, `POST /api/visuals` and
+`POST /api/dashboards` all behaved as documented below, and the resulting dashboard rendered in
+an embed. Two details differ on 26.2.0 and are corrected in place: the initial-visual template
+carries no `id` key to delete (it has `visId`, which is the visual *type* id), and
+`GET /api/sources/{id}` does not return fields, so field discovery goes through
+`GET /api/sources/{id}/fields`.
+
+The client-side assembly half is checked against the embed SDK in `_run/embed-26.2.1.js`. That
+file is byte-identical (md5 `c3ae95e1…`) to the `embed.js` served by the live 26.2.0, so the
+loader did not change across those builds; the filename records where it was pulled from, not a
+version requirement.
+
+Earlier versions may have different endpoint paths or missing features (dashboard import/export,
+for one, arrived later). If the user's instance is older, the export-modify-import workflow may
+not be available; fall back to individual `POST /api/dashboards` calls.
 
 ### Authentication Patterns
 
@@ -126,7 +142,9 @@ template.level = 'IN_DASHBOARD';  // MUST change from 'TOP' to 'IN_DASHBOARD'
 template.source.variables['Y Axis'] = [{ name: 'session_cost', func: 'sum', colorConfig: { autoShowColorLegend: true } }];
 template.source.variables['Trend Attribute'].name = 'session_date';
 template.source.variables['Trend Attribute'].sort.name = 'session_date';
-delete template.id;  // Remove any ID so Composer generates a new one
+delete template.id;  // Harmless, but a no-op on 26.2.0: the template has no `id` key.
+                     // It has `visId`, which is the visual TYPE id and must stay.
+                     // POST /api/visuals returns the new visual's `id`.
 
 // Example: Modify a KPI template
 template.visualName = 'Total Budget';
